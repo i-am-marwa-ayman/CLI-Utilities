@@ -4,7 +4,7 @@
 
 int main(int argc,char * argv[]){
     if(argc == 1){
-        printf("wzip: file1 [file2 ...]\n");
+        printf("Usage:zip <file1> <file2> ...]\n");
         return 1;
     }
     char letter = '\0';
@@ -13,7 +13,7 @@ int main(int argc,char * argv[]){
         FILE *srcFile;
         srcFile = fopen(argv[i], "r");
         if (srcFile == NULL){
-            printf("wzip: cannot open file '%s'\n", argv[i]);
+            printf("zip: somthing went wrong can't open %s file or file don't exist!\n",argv[i]);
             return 1;
         }
 
