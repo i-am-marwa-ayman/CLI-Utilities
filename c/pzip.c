@@ -6,8 +6,6 @@
 #include <sys/sysinfo.h>
 #include <sys/mman.h>
 
-
-
 typedef struct {
     int count;
     char letter;
@@ -22,9 +20,9 @@ typedef struct {
 
 int get_file_size(FILE *fp){
     fseek(fp, 0L, SEEK_END);
-    int res = ftell(fp);
+    int file_size = ftell(fp);
     rewind(fp);
-    return res;
+    return file_size;
 }
 
 void *zip_chunk(void *args){
@@ -62,8 +60,11 @@ int main(int argc,char * argv[]){
         printf("Usage:pzip <file1> <file2> ...]\n");
         return 1;
     }
+    int allocated = 0;
+    int offset = 0;
     for (int i = 1; i < argc; i++)
     {
+        printf("%d:\n",i);
         FILE *fp = fopen(argv[i], "r");
         if (fp == NULL){
             printf("pzip: somthing went wrong can't open %s file or file don't exist!\n",argv[i]);
@@ -77,7 +78,7 @@ int main(int argc,char * argv[]){
 
         char *start = mmap(NULL, file_size, PROT_READ, MAP_PRIVATE, fileno(fp), 0);
         for(int j = 0;j < chunk_num;j++){
-            chunks[j].ind = j;
+            chunks[j].ind = j + offset;
             chunks[j].raw_data = start + (j * chunk_size);
             if(j == chunk_num - 1){
                 chunks[j].size = file_size - chunk_size * j;
@@ -85,8 +86,16 @@ int main(int argc,char * argv[]){
                 chunks[j].size = chunk_size;
             }
         }
-
-        res = malloc(sizeof(coded_data*) * chunk_num);
+        
+        if(allocated){
+            res = realloc(res, sizeof(coded_data*) * (chunk_num + offset));
+        } else {
+            res = malloc(sizeof(coded_data*) * chunk_num);
+            allocated = 1;
+        }
+        if(res == NULL){
+            return -1;
+        }
         pthread_t zippers[chunk_num];
         for (int j = 0; j < chunk_num; j++) {
             pthread_create(&zippers[j], NULL, zip_chunk, (void *)&chunks[j]);
@@ -94,17 +103,18 @@ int main(int argc,char * argv[]){
         for (int j = 0; j < chunk_num; j++) {
             pthread_join(zippers[j], NULL);
         }
-        for(int j = 0;j < chunk_num;j++){
-            for(int k = 0;k < chunks[j].size;k++){
-                if(res[j][k].count > 0){
-                    printf("letter %c count %d\n",res[j][k].letter,res[j][k].count);
-                }
-            }
-        }
-        
-        
+        offset += chunk_num;
         munmap(start, file_size);
         fclose(fp);
+    }
+    int i = 0;
+    printf("%d\n", offset);
+    for(int i = 0;i < offset;i++){
+        int j = 0;
+        while(res[i][j].count > 0){
+            printf("letter %c : %d\n",res[i][j].letter, res[i][j].count);
+            j++;
+        }
     }
     return 0;
 }
