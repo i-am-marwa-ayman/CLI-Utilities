@@ -11,7 +11,8 @@ typedef struct {
     char letter;
 } coded_data;
 
-coded_data **res;
+coded_data **res = NULL;
+
 typedef struct {
     int ind;
     int size;
@@ -27,12 +28,15 @@ int get_file_size(FILE *fp){
 
 void *zip_chunk(void *args){
     chunk cur_chunk = *(chunk*)args;
-    res[cur_chunk.ind] = malloc(sizeof(coded_data) * cur_chunk.size);
-    int count = 0;
+    res[cur_chunk.ind] = malloc(sizeof(coded_data) * (cur_chunk.size + 10));
+    if(res[cur_chunk.ind] == NULL){
+        return NULL;
+    }
+    int count = 0, ptr = 0;
     char letter = '\0';
-    int ptr = 0;
-    for (int c = 0; c < cur_chunk.size; c++){
-        char cur_letter = cur_chunk.raw_data[c];
+
+    for (int i = 0; i < cur_chunk.size; i++){
+        char cur_letter = cur_chunk.raw_data[i];
         if (letter != cur_letter){
             if (count != 0){
                 coded_data new_letter;
@@ -52,22 +56,22 @@ void *zip_chunk(void *args){
         new_letter.letter = letter;
         res[cur_chunk.ind][ptr++] = new_letter;
     }
+    res[cur_chunk.ind][ptr].count = 0;
+    res[cur_chunk.ind][ptr].letter = '\0';
     return NULL;
 }
 
 int main(int argc,char * argv[]){
     if(argc == 1){
-        printf("Usage:pzip <file1> <file2> ...]\n");
+        printf("wzip: file1 [file2 ...]\n");
         return 1;
     }
-    int allocated = 0;
-    int offset = 0;
+    int total_chunks = 0;
     for (int i = 1; i < argc; i++)
     {
-        printf("%d:\n",i);
         FILE *fp = fopen(argv[i], "r");
         if (fp == NULL){
-            printf("pzip: somthing went wrong can't open %s file or file don't exist!\n",argv[i]);
+            printf("wzip: somthing went wrong can't open %s file or file don't exist!\n",argv[i]);
             return -1;
         }
         int file_size = get_file_size(fp);
@@ -77,8 +81,14 @@ int main(int argc,char * argv[]){
         chunk chunks[chunk_num];
 
         char *start = mmap(NULL, file_size, PROT_READ, MAP_PRIVATE, fileno(fp), 0);
+        if (start == MAP_FAILED) {
+            perror("mmap failed");
+            fclose(fp);
+            return -1;
+        }
+        
         for(int j = 0;j < chunk_num;j++){
-            chunks[j].ind = j + offset;
+            chunks[j].ind = j + total_chunks;
             chunks[j].raw_data = start + (j * chunk_size);
             if(j == chunk_num - 1){
                 chunks[j].size = file_size - chunk_size * j;
@@ -86,16 +96,12 @@ int main(int argc,char * argv[]){
                 chunks[j].size = chunk_size;
             }
         }
-        
-        if(allocated){
-            res = realloc(res, sizeof(coded_data*) * (chunk_num + offset));
-        } else {
-            res = malloc(sizeof(coded_data*) * chunk_num);
-            allocated = 1;
-        }
-        if(res == NULL){
+        coded_data ** new_res = realloc(res, sizeof(coded_data*) * (chunk_num + total_chunks));
+        if(new_res == NULL){
             return -1;
         }
+        res = new_res;
+
         pthread_t zippers[chunk_num];
         for (int j = 0; j < chunk_num; j++) {
             pthread_create(&zippers[j], NULL, zip_chunk, (void *)&chunks[j]);
@@ -103,18 +109,39 @@ int main(int argc,char * argv[]){
         for (int j = 0; j < chunk_num; j++) {
             pthread_join(zippers[j], NULL);
         }
-        offset += chunk_num;
+        total_chunks += chunk_num;
         munmap(start, file_size);
         fclose(fp);
     }
-    int i = 0;
-    printf("%d\n", offset);
-    for(int i = 0;i < offset;i++){
+    
+    for(int i = 0;i < total_chunks;i++){
         int j = 0;
         while(res[i][j].count > 0){
-            printf("letter %c : %d\n",res[i][j].letter, res[i][j].count);
+            if(res[i][j + 1].count == 0){
+                if(i + 1 < total_chunks && res[i + 1] != NULL &&  res[i][j].letter == res[i + 1][0].letter){
+                    res[i + 1][0].count += res[i][j].count;
+                }
+                else {
+                    //printf("%c %d\n", res[i][j].letter, res[i][j].count);
+                    fwrite(&res[i][j].count, sizeof(int), 1, stdout);
+                    fwrite(&res[i][j].letter, sizeof(char), 1, stdout);
+                }
+            } else {
+                //printf("%c %d\n", res[i][j].letter, res[i][j].count);
+                fwrite(&res[i][j].count, sizeof(int), 1, stdout);
+                fwrite(&res[i][j].letter, sizeof(char), 1, stdout);
+            }
             j++;
         }
+    }
+    
+    for(int i = 0;i < total_chunks;i++){
+        if(res[i] != NULL){
+            free(res[i]);
+        }
+    }
+    if(res != NULL){
+        free(res);
     }
     return 0;
 }
